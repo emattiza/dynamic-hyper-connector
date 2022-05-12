@@ -1,53 +1,97 @@
-use std::sync::Arc;
+use std::{str::FromStr, pin::Pin, net::TcpStream, sync::Arc};
 
-use futures_util::{future::BoxFuture, AsyncRead, AsyncWrite};
-use hyper::{client::HttpConnector, service::Service, Body, Client, Uri};
-use hyperlocal::UnixConnector;
+use anyhow::{anyhow, Error};
+use futures_util::{Future};
+use hyper::{client::{HttpConnector, connect::Connection}, Body, Client, Uri, service::Service};
+use hyper_unix_connector::{UnixClient, UDS};
+use tokio::io::{AsyncRead, AsyncWrite};
 
-trait DynResponse: Send + Sync {}
-impl<T> DynResponse for T
-where
-    T: AsyncRead + AsyncWrite,
-    T: Send + Sync,
-{
+#[derive(Clone)]
+pub enum MultiConnector {
+    Http(HttpConnector),
+    Unix(UnixClient)
 }
-type ArcDynResponse = Arc<dyn DynResponse>;
 
-trait DynError: Send + Sync {}
-impl<T> DynError for T
-where
-    T: std::error::Error,
-    T: Send + Sync,
-{
+#[derive(Clone)]
+pub enum BaseConnection {
+    Unix(Arc<UDS>),
+    Http(Arc<TcpStream>)
 }
-type ArcDynError = Arc<dyn DynError>;
 
-type DynamicConnector = Arc<
-    dyn Service<
-        Uri,
-        Response = ArcDynResponse,
-        Error = ArcDynError,
-        Future = BoxFuture<'static, Result<ArcDynResponse, ArcDynError>>,
-    >,
->;
-
-fn new_connector(url: &str) -> DynamicConnector {
-    if url.starts_with("unix://") {
-        Arc::new(UnixConnector::default())
-    } else {
-        Arc::new(HttpConnector::new())
+impl Connection for BaseConnection {
+    fn connected(&self) -> hyper::client::connect::Connected {
+        todo!()
     }
 }
 
-fn generic_client(url: &str) -> Client<DynamicConnector, Body> {
-    Client::builder().build(new_connector(url))
+impl AsyncRead for BaseConnection {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        todo!()
+    }
+}
+
+impl AsyncWrite for BaseConnection {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        todo!()
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
+        todo!()
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
+        todo!()
+    }
+}
+
+trait AsyncRW: AsyncRead + AsyncWrite + Connection {}
+impl Service<Uri> for MultiConnector {
+    type Response = BaseConnection;
+
+    type Error = Error;
+
+    type Future = 
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        todo!()
+    }
+
+    fn call(&mut self, req: Uri) -> Self::Future {
+        todo!()
+    }
+}
+
+fn generic_client(url: &str) -> Result<Client<MultiConnector, Body>, anyhow::Error> {
+    Uri::from_str(url)?
+    .scheme_str()
+    .map::<MultiConnector, _>(|scheme| {
+        let connector = match scheme {
+            "http" | "https" => Some(MultiConnector::Http(HttpConnector::new())),
+            "unix" => Some(MultiConnector::Unix(UnixClient)),
+            _ => None
+        };
+        connector.unwrap()
+    })
+    .ok_or(anyhow!("Invalid Scheme"))
+    .map(|conn| {
+       Client::builder().build(conn) 
+    })
 }
 
 // Individual Builds
-fn build_unix() -> Client<UnixConnector, Body> {
-    Client::builder().build(UnixConnector::default())
+fn build_unix() -> Client<MultiConnector, Body> {
+    Client::builder().build(MultiConnector::Unix(UnixClient))
 }
 
-fn build_http() -> Client<HttpConnector, Body> {
-    Client::builder().build(HttpConnector::new())
+fn build_http() -> Client<MultiConnector, Body> {
+    Client::builder().build(MultiConnector::Http(HttpConnector::new()))
 }

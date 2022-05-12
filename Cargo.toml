@@ -9,4 +9,6 @@ edition = "2021"
 axum = "0.5.5"
 futures-util = { version = "0.3.21", features = ["io"] }
 hyper = { version = "0.14.18", features = ["client"] }
-hyperlocal = { version = "0.8.0", features = ["client"], default-features = false }
+tokio = "1.18.2"
+hyper-unix-connector = "0.2.2"
+anyhow = "1.0.57"
