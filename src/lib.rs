@@ -1,53 +1,63 @@
-use std::sync::Arc;
+use std::{error::Error, str::FromStr, task::Poll, sync::Arc};
 
-use futures_util::{future::BoxFuture, AsyncRead, AsyncWrite};
-use hyper::{client::HttpConnector, service::Service, Body, Client, Uri};
-use hyperlocal::UnixConnector;
+use futures_util::{future::BoxFuture, Future, AsyncRead};
+use hyper::{client::{connect::{Connection, Connected}}, service::Service, Body, Client, Uri};
+use tokio::net::{UnixStream, TcpStream};
 
-trait DynResponse: Send + Sync {}
-impl<T> DynResponse for T
-where
-    T: AsyncRead + AsyncWrite,
-    T: Send + Sync,
-{
-}
-type ArcDynResponse = Arc<dyn DynResponse>;
 
-trait DynError: Send + Sync {}
-impl<T> DynError for T
-where
-    T: std::error::Error,
-    T: Send + Sync,
-{
-}
-type ArcDynError = Arc<dyn DynError>;
+// impl Connection for MultiConnection {
+//     fn connected(&self) -> hyper::client::connect::Connected {
+//         Connected::new().into()
+//     }
+// }
 
-type DynamicConnector = Arc<
-    dyn Service<
-        Uri,
-        Response = ArcDynResponse,
-        Error = ArcDynError,
-        Future = BoxFuture<'static, Result<ArcDynResponse, ArcDynError>>,
-    >,
->;
+impl Future for MultiConnection {
+    type Output = Result<(), std::io::Error>;
 
-fn new_connector(url: &str) -> DynamicConnector {
-    if url.starts_with("unix://") {
-        Arc::new(UnixConnector::default())
-    } else {
-        Arc::new(HttpConnector::new())
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        self.poll_ready(cx)
     }
 }
 
-fn generic_client(url: &str) -> Client<DynamicConnector, Body> {
-    Client::builder().build(new_connector(url))
+impl MultiConnection {
+    async fn new(url: &str) {
+        MultiConnection::Unix(Arc::new(UnixStream::connect(path)))
+    }
 }
 
-// Individual Builds
-fn build_unix() -> Client<UnixConnector, Body> {
-    Client::builder().build(UnixConnector::default())
+#[derive(Clone)]
+pub(crate) enum MultiConnection {
+    Unix(Arc<UnixStream>),
+    Http(Arc<TcpStream>)
 }
 
-fn build_http() -> Client<HttpConnector, Body> {
-    Client::builder().build(HttpConnector::new())
+impl Service<Uri> for MultiConnection {
+    type Response = ();
+
+    type Error = std::io::Error;
+
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Uri) -> Self::Future {
+        match req.scheme_str() {
+            Some("http") => unimplemented!(),
+            Some("unix") => unimplemented!(),
+            Some(_) => unimplemented!(),
+            None => unimplemented!()
+        }
+    }
+}
+
+fn generic_client(url: &str) -> Result<Client<MultiConnection, Body>, Box<dyn Error>> {
+    match Uri::from_str(url) {
+        Ok(uri) => Ok(Client::builder().build(MultiConnection::new(url).call(uri))),
+        Err(err) => Err(Box::new(err)),
+    }
 }
