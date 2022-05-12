@@ -1,4 +1,4 @@
-use std::{str::FromStr, pin::Pin, net::TcpStream, sync::Arc};
+use std::{str::FromStr, pin::Pin, net::TcpStream, sync::Arc, any};
 
 use anyhow::{anyhow, Error};
 use futures_util::{Future};
@@ -73,13 +73,13 @@ impl Service<Uri> for MultiConnector {
 fn generic_client(url: &str) -> Result<Client<MultiConnector, Body>, anyhow::Error> {
     Uri::from_str(url)?
     .scheme_str()
-    .map::<MultiConnector, _>(|scheme| {
-        let connector = match scheme {
-            "http" | "https" => Some(MultiConnector::Http(HttpConnector::new())),
-            "unix" => Some(MultiConnector::Unix(UnixClient)),
-            _ => None
-        };
-        connector.unwrap()
+    .filter(|&x| x.eq("http") || x.eq("unix") || x.eq("https") )
+    .map::<MultiConnector, _>(|scheme: &str| -> MultiConnector {
+        if let "http" | "https" = scheme {
+            MultiConnector::Http(HttpConnector::new())
+        } else {
+            MultiConnector::Unix(UnixClient)
+        }
     })
     .ok_or(anyhow!("Invalid Scheme"))
     .map(|conn| {
